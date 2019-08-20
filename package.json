@@ -1,0 +1,26 @@
+{
+  "name": "cityexplorer",
+  "version": "1.0.0",
+  "description": "City Explorer Lab 06 - Peter Carmichael",
+  "main": "server.js",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^8.1.0",
+    "express": "^4.17.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pcarmichael22/cityExplorer.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/pcarmichael22/cityExplorer/issues"
+  },
+  "homepage": "https://github.com/pcarmichael22/cityExplorer#readme"
+}
