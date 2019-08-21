@@ -58,7 +58,7 @@ app.get('/weather', (request, response) => {
 
     const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${localData.latitude},${localData.longitude}`;
 
-    console.log(darkSkyUrl);
+    // console.log(darkSkyUrl);
 
     superagent.get(darkSkyUrl).then(responseFromSuper => {
         // console.log('Location Body', responseFromSuper.body);
@@ -66,13 +66,39 @@ app.get('/weather', (request, response) => {
         const weatherBody = responseFromSuper.body;
 
         const eightDays = weatherBody.daily.data;
-        console.log('DAILY DATA', eightDays);
+        // console.log('DAILY DATA', eightDays);
 
         const formattedDays = eightDays.map(
             day => new Day(day.summary, day.time)
         );
 
         response.send(formattedDays)
+    })
+})
+
+//constructor function for eventbrite
+function Events(link, name, date, summary) {
+    this.link = link;
+    this.name = name;
+    this.event_date = new Date(date).toDateString();
+    this.summary = summary;
+}
+// set up an app.get for /eventbrite
+app.get('/events', (request, response) => {
+    let eventData = request.query.data;
+
+    const eventUrlData =
+        `https://www.eventbriteapi.com/v3/events/search/?sort_by=date&location.latitude=${eventData.latitude}&location.longitude=${eventData.longitude}&token=ZDDD2HU3AK5DLAZ6IYF5`
+
+
+    superagent.get(eventUrlData).then(responseFromSuper => {
+        // console.log('stuff', responseFromSuper.body.events);
+
+        const eventBody = responseFromSuper.body.events;
+
+        const dailyEvents = eventBody.map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
+
+        response.send(dailyEvents);
     })
 })
 app.listen(PORT, () => { console.log(`app is up on PORT ${PORT}`) });
