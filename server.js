@@ -1,79 +1,78 @@
 'use strict';
 
 const express = require('express');
-require('dotenv').config()
 const cors = require('cors');
+//superagent talks to the internet over http
+const superagent = require('superagent');
+require('dotenv').config()
 
 const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT;
 
-let weatherDailyArr = [];
-
-
-//location constructor
-function NewLocation(query, format, lat, lng) {
+function Location(query, format, lat, lng) {
     this.search_query = query;
     this.formatted_query = format;
     this.latitude = lat;
     this.longitude = lng;
-
 }
 
-//weather constructor
-function NewWeatherData(summary, date) {
+app.get('/location', (request, response) => {
+    const query = request.query.data; //seattle
+
+    const urlToVisit = `https://maps.googleapis.com/maps/api/geocode/json?address=${request.query.data}&key=AIzaSyBt-Y_4KtCaKJtFOMkhzegnVxwVy4KrNic`;
+
+    // superagent.get('url as a string');
+    superagent.get(urlToVisit).then(responseFromSuper => {
+            // console.log('stuff', responseFromSuper.body);
+
+            // I simply replaced my geodata require, with the data in the body of my superagent response
+            const geoData = responseFromSuper.body;
+
+            const specificGeoData = geoData.results[0];
+
+            const formatted = specificGeoData.formatted_address;
+            const lat = specificGeoData.geometry.location.lat;
+            const lng = specificGeoData.geometry.location.lng;
+
+            const newLocation = new Location(query, formatted, lat, lng)
+            response.send(newLocation);
+        }).catch(error => {
+            response.status(500).send(error.message);
+            console.error(error);
+        })
+        // console.log('thingsfrominternets', thingFromInternet);
+})
+
+
+function Day(summary, time) {
     this.forecast = summary;
-    this.time = date;
+    this.time = new Date(time * 1000).toDateString();
 }
 
-//Get location Data
-app.get('/location', (req, res) => {
-    try {
-        const searchQuery = req.query.data;
-        const dataFromGoogle = require('./data/geo.json');
-        const formattedQuery = dataFromGoogle.results[0].formatted_address;
-        const lat = dataFromGoogle.results[0].geometry.location.lat;
-        const lng = dataFromGoogle.results[0].geometry.location.lng;
-
-        const formattedData = new NewLocation(searchQuery, formattedQuery, lat, lng);
-
-        res.send(formattedData);
-
-    } catch (error) {
-        console.error(error);
-    }
-})
-
-//Get Weather Data
-// weather information
 app.get('/weather', (request, response) => {
-    try {
+    // console.log(request);
 
-        const weatherData = require('./data/darksky.json');
+    let localData = request.query.data;
 
-        // the search query comes from the front end
-        // const searchQuery = request.query.data;
+    const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${localData.latitude},${localData.longitude}`;
 
-        // the below come from darksky json
+    console.log(darkSkyUrl);
 
-        for (let i = 0; i < weatherData.daily.data.length; i++) {
-            let forecast = weatherData.daily.data[i].summary;
-            let time = weatherData.daily.data[i].time * 1000;
-            var unixTime = new Date(time)
-            let weatherDaily = new NewWeatherData(forecast, unixTime);
-            weatherDailyArr.push(weatherDaily);
-        }
+    superagent.get(darkSkyUrl).then(responseFromSuper => {
+        // console.log('Location Body', responseFromSuper.body);
 
-        response.send(weatherDailyArr);
-        // console.log(weatherData);
+        const weatherBody = responseFromSuper.body;
 
-    } catch (error) {
-        console.error(error);
-        response.send(error.message);
-    }
+        const eightDays = weatherBody.daily.data;
+        console.log('DAILY DATA', eightDays);
+
+        const formattedDays = eightDays.map(
+            day => new Day(day.summary, day.time)
+        );
+
+        response.send(formattedDays)
+    })
 })
-
-app.listen(PORT, () => {
-    console.log(`app is running on ${PORT}`);
-});
+app.listen(PORT, () => { console.log(`app is up on PORT ${PORT}`) });
