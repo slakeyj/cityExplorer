@@ -27,7 +27,7 @@ function Location(query, format, lat, lng) {
 
 app.get('/location', (request, response) => {
     const query = request.query.data; //seattle
-
+    // console.log('LOCATION QUERY', query);
     client.query(`SELECT * FROM locations WHERE search_query=$1`, [query]).then(sqlResult => {
         if (sqlResult.rowCount > 0) {
             response.send(sqlResult.rows[0]);
@@ -74,59 +74,93 @@ function Day(summary, time) {
 }
 
 app.get('/weather', (request, response) => {
-        // console.log(request);
+    // console.log(request);
 
-        let localData = request.query.data;
+    let localData = request.query.data;
+    console.log('LOCAL DATA', localData);
 
-        const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${localData.latitude},${localData.longitude}`;
+    client.query(`SELECT * FROM weather WHERE search_query=$1`, [localData.search_query]).then(sqlResult => {
+        if (sqlResult.rowCount > 0) {
+            response.send(sqlResult.rows[0]);
+        } else {
 
-        // console.log(darkSkyUrl);
+            const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${localData.latitude},${localData.longitude}`;
 
-        superagent.get(darkSkyUrl).then(responseFromSuper => {
-            // console.log('Location Body', responseFromSuper.body);
+            console.log(darkSkyUrl);
 
-            const weatherBody = responseFromSuper.body;
+            superagent.get(darkSkyUrl).then(responseFromSuper => {
+                // console.log('Location Body', responseFromSuper.body);
 
-            const eightDays = weatherBody.daily.data;
-            // console.log('DAILY DATA', eightDays);
+                const weatherBody = responseFromSuper.body;
 
-            const formattedDays = eightDays.map(
-                day => new Day(day.summary, day.time)
-            );
+                const eightDays = weatherBody.daily.data;
+                // console.log('DAILY DATA', eightDays);
+                console.log('8 DAYS', eightDays);
+                const formattedDays = eightDays.map(day =>
+                    new Day(day.summary, day.time));
 
-            response.send(formattedDays)
-        }).catch(error => {
-            response.status(500).send(error.message);
-            console.error(error);
-        })
+                console.log('formatted days', formattedDays);
+                formattedDays.forEach(day => {
+                    const sqlQueryInsert = `INSERT INTO weather (search_query, forecast, time) VALUES ($1,$2,$3);`;
+                    const sqlValueArr = [localData.search_query, day.forecast, day.time];
+                    client.query(sqlQueryInsert, sqlValueArr);
+                })
+                response.send(formattedDays);
+            }).catch(error => {
+                response.status(500).send(error.message);
+                console.error(error);
+            })
 
-        //constructor function for eventbrite
-        function Events(link, name, date, summary) {
-            this.link = link;
-            this.name = name;
-            this.event_date = new Date(date).toDateString();
-            this.summary = summary;
         }
+
     })
-    // set up an app.get for /eventbrite
+
+})
+
+// constructor function for eventbrite
+function Events(link, name, date, summary) {
+    this.link = link;
+    this.name = name;
+    this.event_date = new Date(date).toDateString();
+    this.summary = summary;
+}
+// set up an app.get for /eventbrite
 app.get('/events', (request, response) => {
     let eventData = request.query.data;
+    console.log('event data', eventData);
+    client.query(`SELECT * FROM events WHERE search_query=$1`, [eventData.search_query]).then(sqlResult => {
+        if (sqlResult.rowCount > 0) {
+            response.send(sqlResult.rows[0]);
+        } else {
 
-    const eventUrlData =
-        `https://www.eventbriteapi.com/v3/events/search/?sort_by=date&location.latitude=${eventData.latitude}&location.longitude=${eventData.longitude}&token=ZDDD2HU3AK5DLAZ6IYF5`
+            const eventUrlData =
+                `https://www.eventbriteapi.com/v3/events/search/?sort_by=date&location.latitude=${eventData.latitude}&location.longitude=${eventData.longitude}&token=ZDDD2HU3AK5DLAZ6IYF5`
 
 
-    superagent.get(eventUrlData).then(responseFromSuper => {
-        // console.log('stuff', responseFromSuper.body.events);
+            superagent.get(eventUrlData).then(responseFromSuper => {
+                // console.log('stuff', responseFromSuper.body.events);
 
-        const eventBody = responseFromSuper.body.events;
+                const eventBody = responseFromSuper.body.events;
 
-        const dailyEvents = eventBody.map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
+                const dailyEvents = eventBody.map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
 
-        response.send(dailyEvents);
-    }).catch(error => {
-        response.status(500).send(error.message);
-        console.error(error);
+                dailyEvents.forEach(event => {
+                    const sqlQueryInsert = `INSERT INTO events (search_query, link, name, event_date, summary) VALUES ($1,$2,$3,$4,$5);`;
+                    const sqlValueArr = [eventData.search_query, event.link, event.name, event.date, event.summary];
+                    client.query(sqlQueryInsert, sqlValueArr);
+                })
+
+                response.send(dailyEvents);
+            }).catch(error => {
+                response.status(500).send(error.message);
+                console.error(error);
+
+            })
+
+        }
     })
 })
+
+
+
 app.listen(PORT, () => { console.log(`app is up on PORT ${PORT}`) })
