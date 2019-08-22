@@ -4,10 +4,17 @@ const express = require('express');
 const cors = require('cors');
 //superagent talks to the internet over http
 const superagent = require('superagent');
+const pg = require('pg');
 require('dotenv').config()
 
 const app = express();
 app.use(cors());
+
+//postgres client
+const client = new pg.Client(process.env.DATABASE_URL);
+client.connect();
+// setup error logging
+client.on('error', (error) => console.error(error));
 
 const PORT = process.env.PORT;
 
@@ -21,28 +28,43 @@ function Location(query, format, lat, lng) {
 app.get('/location', (request, response) => {
     const query = request.query.data; //seattle
 
-    const urlToVisit = `https://maps.googleapis.com/maps/api/geocode/json?address=${request.query.data}&key=AIzaSyBt-Y_4KtCaKJtFOMkhzegnVxwVy4KrNic`;
+    client.query(`SELECT * FROM locations WHERE search_query=$1`, [query]).then(sqlResult => {
+        if (sqlResult.rowCount > 0) {
+            response.send(sqlResult.rows[0]);
+        } else {
 
-    // superagent.get('url as a string');
-    superagent.get(urlToVisit).then(responseFromSuper => {
-            // console.log('stuff', responseFromSuper.body);
 
-            // I simply replaced my geodata require, with the data in the body of my superagent response
-            const geoData = responseFromSuper.body;
+            const urlToVisit = `https://maps.googleapis.com/maps/api/geocode/json?address=${request.query.data}&key=${process.env.GEOCODE_API_KEY}`;
 
-            const specificGeoData = geoData.results[0];
+            // superagent.get('url as a string');
+            superagent.get(urlToVisit).then(responseFromSuper => {
+                // console.log('stuff', responseFromSuper.body);
 
-            const formatted = specificGeoData.formatted_address;
-            const lat = specificGeoData.geometry.location.lat;
-            const lng = specificGeoData.geometry.location.lng;
+                // I simply replaced my geodata require, with the data in the body of my superagent response
+                const geoData = responseFromSuper.body;
 
-            const newLocation = new Location(query, formatted, lat, lng)
-            response.send(newLocation);
-        }).catch(error => {
-            response.status(500).send(error.message);
-            console.error(error);
-        })
-        // console.log('thingsfrominternets', thingFromInternet);
+                //THIS IS WHAT WRITES DATA TO SQL DATABASE
+
+                const specificGeoData = geoData.results[0];
+
+                const formatted = specificGeoData.formatted_address;
+                const lat = specificGeoData.geometry.location.lat;
+                const lng = specificGeoData.geometry.location.lng;
+
+                const newLocation = new Location(query, formatted, lat, lng)
+
+                const sqlQueryInsert = `INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES ($1,$2,$3,$4);`;
+                const sqlValueArr = [newLocation.search_query, newLocation.formatted_query, newLocation.latitude, newLocation.longitude];
+                client.query(sqlQueryInsert, sqlValueArr);
+
+                response.send(newLocation);
+            }).catch(error => {
+                response.status(500).send(error.message);
+                console.error(error);
+            })
+        }
+
+    })
 })
 
 
@@ -52,38 +74,41 @@ function Day(summary, time) {
 }
 
 app.get('/weather', (request, response) => {
-    // console.log(request);
+        // console.log(request);
 
-    let localData = request.query.data;
+        let localData = request.query.data;
 
-    const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${localData.latitude},${localData.longitude}`;
+        const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${localData.latitude},${localData.longitude}`;
 
-    // console.log(darkSkyUrl);
+        // console.log(darkSkyUrl);
 
-    superagent.get(darkSkyUrl).then(responseFromSuper => {
-        // console.log('Location Body', responseFromSuper.body);
+        superagent.get(darkSkyUrl).then(responseFromSuper => {
+            // console.log('Location Body', responseFromSuper.body);
 
-        const weatherBody = responseFromSuper.body;
+            const weatherBody = responseFromSuper.body;
 
-        const eightDays = weatherBody.daily.data;
-        // console.log('DAILY DATA', eightDays);
+            const eightDays = weatherBody.daily.data;
+            // console.log('DAILY DATA', eightDays);
 
-        const formattedDays = eightDays.map(
-            day => new Day(day.summary, day.time)
-        );
+            const formattedDays = eightDays.map(
+                day => new Day(day.summary, day.time)
+            );
 
-        response.send(formattedDays)
+            response.send(formattedDays)
+        }).catch(error => {
+            response.status(500).send(error.message);
+            console.error(error);
+        })
+
+        //constructor function for eventbrite
+        function Events(link, name, date, summary) {
+            this.link = link;
+            this.name = name;
+            this.event_date = new Date(date).toDateString();
+            this.summary = summary;
+        }
     })
-})
-
-//constructor function for eventbrite
-function Events(link, name, date, summary) {
-    this.link = link;
-    this.name = name;
-    this.event_date = new Date(date).toDateString();
-    this.summary = summary;
-}
-// set up an app.get for /eventbrite
+    // set up an app.get for /eventbrite
 app.get('/events', (request, response) => {
     let eventData = request.query.data;
 
@@ -99,6 +124,9 @@ app.get('/events', (request, response) => {
         const dailyEvents = eventBody.map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
 
         response.send(dailyEvents);
+    }).catch(error => {
+        response.status(500).send(error.message);
+        console.error(error);
     })
 })
-app.listen(PORT, () => { console.log(`app is up on PORT ${PORT}`) });
+app.listen(PORT, () => { console.log(`app is up on PORT ${PORT}`) })
