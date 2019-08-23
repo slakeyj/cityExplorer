@@ -130,6 +130,7 @@ function Events(link, name, date, summary) {
   this.name = name;
   this.event_date = new Date(date).toDateString();
   this.summary = summary;
+  this.created_at = Date.now();
 }
 // set up an app.get for /eventbrite
 app.get('/events', (request, response) => {
@@ -137,8 +138,20 @@ app.get('/events', (request, response) => {
   //console.log('event data', eventData);
   client.query(`SELECT * FROM events WHERE search_query=$1`, [eventData.search_query]).then(sqlResult => {
 
+    let notTooOld = true;
     if (sqlResult.rowCount > 0) {
+      const age = sqlResult.rows[0].created_at;
+      // console.log('sql result', sqlResult.rows[0].created_at);
+      const ageInSeconds = (Date.now() - age) / 1000;
+      if (ageInSeconds > 10) {
+        notTooOld = false;
+        client.query('DELETE FROM events WHERE search_query=$1', [eventData.search_query]);
+      }
+      console.log('events age in seconds', ageInSeconds);
+    }
+    if (sqlResult.rowCount > 0 && notTooOld) {
       response.send(sqlResult.rows);
+
     } else {
 
       const eventUrlData =
@@ -153,8 +166,8 @@ app.get('/events', (request, response) => {
         const dailyEvents = eventBody.slice(0, 20).map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
 
         dailyEvents.forEach(event => {
-          const sqlQueryInsert = `INSERT INTO events (search_query, link, name, event_date, summary) VALUES ($1,$2,$3,$4,$5);`;
-          const sqlValueArr = [eventData.search_query, event.link, event.name, event.date, event.summary];
+          const sqlQueryInsert = `INSERT INTO events (search_query, link, name, event_date, summary, created_at) VALUES ($1,$2,$3,$4,$5,$6);`;
+          const sqlValueArr = [eventData.search_query, event.link, event.name, event.date, event.summary, event.created_at];
           client.query(sqlQueryInsert, sqlValueArr);
         })
 
