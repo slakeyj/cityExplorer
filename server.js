@@ -142,7 +142,7 @@ app.get('/events', (request, response) => {
     } else {
 
       const eventUrlData =
-        `https://www.eventbriteapi.com/v3/events/search/?sort_by=date&location.latitude=${eventData.latitude}&location.longitude=${eventData.longitude}&token=ZDDD2HU3AK5DLAZ6IYF5`
+        `https://www.eventbriteapi.com/v3/events/search/?sort_by=date&location.latitude=${eventData.latitude}&location.longitude=${eventData.longitude}&token=${process.env.EVENTBRITE}`
 
 
       superagent.get(eventUrlData).then(responseFromSuper => {
