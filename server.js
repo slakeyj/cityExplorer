@@ -71,38 +71,45 @@ app.get('/location', (request, response) => {
 function Day(summary, time) {
   this.forecast = summary;
   this.time = new Date(time * 1000).toDateString();
+  this.created_at = Date.now();
 }
 
-app.get('/weather', (request, response) => {
-  // console.log(request);
 
-  let localData = request.query.data;
-  console.log('LOCAL DATA', localData);
+app.get('/weather', (request, response) => {
+  const localData = request.query.data;
+  //console.log('LOCAL DATA', localData);
 
   client.query(`SELECT * FROM weather WHERE search_query=$1`, [localData.search_query]).then(sqlResult => {
+
+    let notTooOld = true;
     if (sqlResult.rowCount > 0) {
-      response.send(sqlResult.rows[0]);
+      const age = sqlResult.rows[0].created_at;
+      // console.log('sql result', sqlResult.rows[0].created_at);
+      const ageInSeconds = (Date.now() - age) / 1000;
+      if (ageInSeconds > 15) {
+        notTooOld = false;
+        client.query('DELETE FROM weather WHERE search_query=$1', [localData.search_query]);
+      }
+      console.log('weather age in seconds', ageInSeconds);
+    }
+    if (sqlResult.rowCount > 0 && notTooOld) {
+      response.send(sqlResult.rows);
     } else {
 
       const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${localData.latitude},${localData.longitude}`;
 
-      console.log(darkSkyUrl);
-
       superagent.get(darkSkyUrl).then(responseFromSuper => {
-        // console.log('Location Body', responseFromSuper.body);
-
         const weatherBody = responseFromSuper.body;
 
         const eightDays = weatherBody.daily.data;
-        // console.log('DAILY DATA', eightDays);
-        console.log('8 DAYS', eightDays);
+
         const formattedDays = eightDays.map(day =>
           new Day(day.summary, day.time));
 
-        console.log('formatted days', formattedDays);
+        // console.log('formatted days', formattedDays);
         formattedDays.forEach(day => {
-          const sqlQueryInsert = `INSERT INTO weather (search_query, forecast, time) VALUES ($1,$2,$3);`;
-          const sqlValueArr = [localData.search_query, day.forecast, day.time];
+          const sqlQueryInsert = `INSERT INTO weather (search_query, forecast, time, created_at) VALUES ($1,$2,$3,$4);`;
+          const sqlValueArr = [localData.search_query, day.forecast, day.time, day.created_at];
           client.query(sqlQueryInsert, sqlValueArr);
         })
         response.send(formattedDays);
@@ -127,10 +134,11 @@ function Events(link, name, date, summary) {
 // set up an app.get for /eventbrite
 app.get('/events', (request, response) => {
   let eventData = request.query.data;
-  console.log('event data', eventData);
+  //console.log('event data', eventData);
   client.query(`SELECT * FROM events WHERE search_query=$1`, [eventData.search_query]).then(sqlResult => {
+
     if (sqlResult.rowCount > 0) {
-      response.send(sqlResult.rows[0]);
+      response.send(sqlResult.rows);
     } else {
 
       const eventUrlData =
@@ -142,7 +150,7 @@ app.get('/events', (request, response) => {
 
         const eventBody = responseFromSuper.body.events;
 
-        const dailyEvents = eventBody.map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
+        const dailyEvents = eventBody.slice(0, 20).map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
 
         dailyEvents.forEach(event => {
           const sqlQueryInsert = `INSERT INTO events (search_query, link, name, event_date, summary) VALUES ($1,$2,$3,$4,$5);`;
@@ -161,6 +169,130 @@ app.get('/events', (request, response) => {
   })
 })
 
+// MOVIE DB
+
+function Movie(title, overview, average_votes, image_url, popularity, released_on) {
+  this.title = title;
+  this.overview = overview;
+  this.average_votes = average_votes;
+  this.image_url = `https://image.tmdb.org/t/p/w500${image_url}`;
+  this.popularity = popularity;
+  this.released_on = released_on;
+  this.created_at = Date.now();
+}
+app.get('/movies', getMovies);
+
+function getMovies(request, response) {
+  const movieData = request.query.data;
+
+  client.query(`SELECT * FROM movies WHERE search_query=$1`, [movieData.search_query]).then(sqlResult => {
+
+    let notTooOld = true;
+
+    if (sqlResult.rowCount > 0) {
+      const age = sqlResult.rows[0].created_at;
+      // console.log('sql result', sqlResult.rows[0].created_at);
+      const ageInSeconds = (Date.now() - age) / 1000;
+      if (ageInSeconds > 2592000) {
+        notTooOld = false;
+        client.query('DELETE FROM movies WHERE search_query=$1', [movieData.search_query]);
+      }
+      console.log('movies age in seconds', ageInSeconds);
+    }
+    if (sqlResult.rowCount > 0 && notTooOld) {
+      response.send(sqlResult.rows);
+
+    } else {
+
+      const movieUrlData = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&query=${movieData.search_query}`;
 
 
-app.listen(PORT, () => { console.log(`app is up on PORT ${PORT}`) })
+      superagent.get(movieUrlData).then(responseFromSuper => {
+        // console.log('stuff', responseFromSuper.body.events);
+
+        const movieBody = responseFromSuper.body.results;
+        const allMovies = movieBody.slice(0, 20).map(movie => new Movie(movie.title, movie.overview, movie.vote_average, movie.poster_path, movie.popularity, movie.release_date));
+
+        allMovies.forEach(movie => {
+          const sqlQueryInsert = `INSERT INTO movies (search_query, title, overview, average_votes, image_url, popularity, released_on, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8);`;
+          const sqlValueArr = [movieData.search_query, movie.title, movie.overview, movie.average_votes, movie.image_url, movie.popularity, movie.released_on, movie.created_at];
+          client.query(sqlQueryInsert, sqlValueArr);
+        })
+
+        response.send(allMovies);
+      }).catch(error => {
+        response.status(500).send(error.message);
+        console.error(error);
+      })
+    }
+  })
+}
+
+// YELP
+function Getyelp(name, image_url, price, rating, url) {
+  this.name = name;
+  this.image_url = image_url;
+  this.price = price;
+  this.rating = rating;
+  this.url = url;
+  this.created_at = Date.now();
+}
+
+app.get('/yelp', getReviews);
+
+function getReviews(request, response) {
+  const reviewData = request.query.data;
+
+  client.query(`SELECT * FROM reviews WHERE search_query=$1`, [reviewData.search_query]).then(sqlResult => {
+    // console.log('sql result', sqlResult);
+    // console.log(reviewData)
+
+    let notTooOld = true;
+
+    if (sqlResult.rowCount > 0) {
+      console.log('in thing')
+      const age = sqlResult.rows[0].created_at;
+      //console.log('sql result', sqlResult.rows[0].created_at);
+      const ageInSeconds = (Date.now() - age) / 1000;
+      if (ageInSeconds > 10) {
+        notTooOld = false;
+        client.query('DELETE FROM reviews WHERE search_query=$1', [reviewData.search_query]);
+      }
+      console.log('reviews age in seconds', ageInSeconds);
+    }
+    if (sqlResult.rowCount > 0 && notTooOld) {
+      response.send(sqlResult.rows);
+
+    } else {
+
+
+      const api_url = `https://api.yelp.com/v3/businesses/search?latitude=${reviewData.latitude}&longitude=${reviewData.longitude}`;
+
+      superagent.get(api_url).set('Authorization', `Bearer ${process.env.YELP_API_KEY}`).then(responseFromSuper => {
+        const yelpData = responseFromSuper.body;
+        //console.log(yelpData)
+        const specificYelpData = yelpData.businesses;
+
+
+        const allReviews = specificYelpData.slice(0, 20).map(review => new Getyelp(review.name, review.image_url, review.price, review.rating, review.url, review.created_at));
+
+
+        allReviews.forEach(review => {
+          const sqlQueryInsert = `INSERT INTO reviews (search_query, name, image_url, price, rating, url, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7);`;
+
+          const sqlValueArr = [reviewData.search_query, review.name, review.image_url, review.price, review.rating, review.url, review.created_at];
+          client.query(sqlQueryInsert, sqlValueArr);
+        })
+
+        response.send(allReviews);
+      }).catch(error => {
+        response.status(500).send(error.message);
+        console.error(error);
+      })
+    }
+  })
+
+}
+
+
+app.listen(PORT, () => { console.log(`app is up on PORT ${PORT}`) });
