@@ -67,6 +67,51 @@ app.get('/events', getEvents);
 app.get('/movies', getMovies);
 app.get('/yelp', getReviews);
 
+// INSERT VALUES
+function insertEventValuesIntoTable(response, data, dailyEvents) {
+  dailyEvents.forEach(event => {
+    const sqlQueryInsert = `INSERT INTO events (search_query, link, name, event_date, summary, created_at) VALUES ($1,$2,$3,$4,$5,$6);`;
+    const sqlValueArr = [data.search_query, event.link, event.name, event.date, event.summary, event.created_at];
+    client.query(sqlQueryInsert, sqlValueArr);
+  })
+  response.send(dailyEvents);
+}
+
+function insertLocationValuesIntoTable(response, newLocation) {
+  const sqlQueryInsert = `INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES ($1,$2,$3,$4);`;
+  const sqlValueArr = [newLocation.search_query, newLocation.formatted_query, newLocation.latitude, newLocation.longitude];
+  client.query(sqlQueryInsert, sqlValueArr);
+
+  response.send(newLocation);
+}
+
+function insertWeatherValuesIntoTable(response, formattedDays, data) {
+  formattedDays.forEach(day => {
+    const sqlQueryInsert = `INSERT INTO weather (search_query, forecast, time, created_at) VALUES ($1,$2,$3,$4);`;
+    const sqlValueArr = [data.search_query, day.forecast, day.time, day.created_at];
+    client.query(sqlQueryInsert, sqlValueArr);
+  })
+  response.send(formattedDays);
+}
+
+function insertMovieValuesIntoTable(response, allMovies, data) {
+  allMovies.forEach(movie => {
+    const sqlQueryInsert = `INSERT INTO movies (search_query, title, overview, average_votes, image_url, popularity, released_on, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8);`;
+    const sqlValueArr = [data.search_query, movie.title, movie.overview, movie.average_votes, movie.image_url, movie.popularity, movie.released_on, movie.created_at];
+    client.query(sqlQueryInsert, sqlValueArr);
+  })
+  response.send(allMovies);
+}
+
+function insertReviewValuesIntoTable(response, allReviews, data) {
+  allReviews.forEach(review => {
+    const sqlQueryInsert = `INSERT INTO reviews (search_query, name, image_url, price, rating, url, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7);`;
+    const sqlValueArr = [data.search_query, review.name, review.image_url, review.price, review.rating, review.url, review.created_at];
+    client.query(sqlQueryInsert, sqlValueArr);
+  })
+  response.send(allReviews);
+}
+
 function returnError(error, response) {
   response.status(500).send(error.message);
   console.error(error);
@@ -86,31 +131,96 @@ function checkSearchAge(sqlResult, data) {
 }
 
 
+// SEND DATA
+function sendGeoData(sqlResult, query, response, urlToVisit) {
+  if (sqlResult.rowCount > 0) {
+    response.send(sqlResult.rows[0]);
+  } else {
+    superagent.get(urlToVisit).then(responseFromSuper => {
+      const geoData = responseFromSuper.body;
+      const specificGeoData = geoData.results[0];
+      const formatted = specificGeoData.formatted_address;
+      const lat = specificGeoData.geometry.location.lat;
+      const lng = specificGeoData.geometry.location.lng;
+      const newLocation = new Location(query, formatted, lat, lng)
+      insertLocationValuesIntoTable(response, newLocation);
+
+    }).catch(error => {
+      returnError(error, response);
+    })
+  }
+}
+
+function sendWeatherData(sqlResult, response, data, darkSkyUrl) {
+  if (sqlResult.rowCount > 0 && notTooOld) {
+    response.send(sqlResult.rows);
+  } else {
+    superagent.get(darkSkyUrl).then(responseFromSuper => {
+      const weatherBody = responseFromSuper.body;
+      const eightDays = weatherBody.daily.data;
+      const formattedDays = eightDays.map(day =>
+        new Weather(day.summary, day.time));
+      insertWeatherValuesIntoTable(response, formattedDays, data);
+
+    }).catch(error => {
+      returnError(error, response);
+    })
+  }
+}
+
+
+function sendEventData(sqlResult, response, data, eventUrlData) {
+  if (sqlResult.rowCount > 0 && notTooOld) {
+    response.send(sqlResult.rows);
+  } else {
+    superagent.get(eventUrlData).then(responseFromSuper => {
+      // console.log('stuff', responseFromSuper.body.events);
+      const eventBody = responseFromSuper.body.events;
+      const dailyEvents = eventBody.slice(0, 20).map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
+
+      insertEventValuesIntoTable(response, data, dailyEvents);
+    }).catch(error => {
+      returnError(error, response);
+    })
+  }
+}
+
+function sendMovieData(sqlResult, response, data, movieUrlData) {
+  if (sqlResult.rowCount > 0 && notTooOld) {
+    response.send(sqlResult.rows);
+  } else {
+    superagent.get(movieUrlData).then(responseFromSuper => {
+      const movieBody = responseFromSuper.body.results;
+      const allMovies = movieBody.slice(0, 20).map(movie => new Movie(movie.title, movie.overview, movie.vote_average, movie.poster_path, movie.popularity, movie.release_date));
+      insertMovieValuesIntoTable(response, allMovies, data)
+
+    }).catch(error => {
+      returnError(error, response);
+    })
+  }
+}
+
+function sendReviewData(sqlResult, response, data, api_url) {
+  if (sqlResult.rowCount > 0 && notTooOld) {
+    response.send(sqlResult.rows);
+  } else {
+    superagent.get(api_url).set('Authorization', `Bearer ${process.env.YELP_API_KEY}`).then(responseFromSuper => {
+      const yelpData = responseFromSuper.body;
+      const specificYelpData = yelpData.businesses;
+      const allReviews = specificYelpData.slice(0, 20).map(review => new YelpReview(review.name, review.image_url, review.price, review.rating, review.url, review.created_at));
+      insertReviewValuesIntoTable(response, allReviews, data);
+    }).catch(error => {
+      returnError(error, response);
+    })
+  }
+}
+
+
 function getLocation(request, response) {
   const query = request.query.data; //seattle
   const urlToVisit = `https://maps.googleapis.com/maps/api/geocode/json?address=${request.query.data}&key=${process.env.GEOCODE_API_KEY}`;
   client.query(`SELECT * FROM locations WHERE search_query=$1`, [query]).then(sqlResult => {
-    if (sqlResult.rowCount > 0) {
-      response.send(sqlResult.rows[0]);
-    } else {
-      superagent.get(urlToVisit).then(responseFromSuper => {
-        const geoData = responseFromSuper.body;
-        const specificGeoData = geoData.results[0];
-        const formatted = specificGeoData.formatted_address;
-        const lat = specificGeoData.geometry.location.lat;
-        const lng = specificGeoData.geometry.location.lng;
-
-        const newLocation = new Location(query, formatted, lat, lng)
-
-        const sqlQueryInsert = `INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES ($1,$2,$3,$4);`;
-        const sqlValueArr = [newLocation.search_query, newLocation.formatted_query, newLocation.latitude, newLocation.longitude];
-        client.query(sqlQueryInsert, sqlValueArr);
-
-        response.send(newLocation);
-      }).catch(error => {
-        returnError(error, response);
-      })
-    }
+    sendGeoData(sqlResult, query, response, urlToVisit)
   })
 }
 
@@ -119,30 +229,11 @@ function getWeather(request, response) {
   const darkSkyUrl = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${data.latitude},${data.longitude}`;
   client.query(`SELECT * FROM weather WHERE search_query=$1`, [data.search_query]).then(sqlResult => {
     checkSearchAge(sqlResult, data);
-    if (sqlResult.rowCount > 0 && notTooOld) {
-      response.send(sqlResult.rows);
-    } else {
-      superagent.get(darkSkyUrl).then(responseFromSuper => {
-        const weatherBody = responseFromSuper.body;
-        const eightDays = weatherBody.daily.data;
-        const formattedDays = eightDays.map(day =>
-          new Weather(day.summary, day.time));
-
-        formattedDays.forEach(day => {
-          const sqlQueryInsert = `INSERT INTO weather (search_query, forecast, time, created_at) VALUES ($1,$2,$3,$4);`;
-          const sqlValueArr = [data.search_query, day.forecast, day.time, day.created_at];
-          client.query(sqlQueryInsert, sqlValueArr);
-        })
-        response.send(formattedDays);
-      }).catch(error => {
-        returnError(error, response);
-      })
-    }
+    sendWeatherData(sqlResult, response, data, darkSkyUrl);
   })
 }
 
 // constructor function for eventbrite
-
 
 function getEvents(request, response) {
   let data = request.query.data;
@@ -150,83 +241,27 @@ function getEvents(request, response) {
     `https://www.eventbriteapi.com/v3/events/search/?sort_by=date&location.latitude=${data.latitude}&location.longitude=${data.longitude}&token=${process.env.EVENTBRITE}`
   client.query(`SELECT * FROM events WHERE search_query=$1`, [data.search_query]).then(sqlResult => {
     checkSearchAge(sqlResult, data, notTooOld);
-    if (sqlResult.rowCount > 0 && notTooOld) {
-      response.send(sqlResult.rows);
-    } else {
-      superagent.get(eventUrlData).then(responseFromSuper => {
-        // console.log('stuff', responseFromSuper.body.events);
-        const eventBody = responseFromSuper.body.events;
-        const dailyEvents = eventBody.slice(0, 20).map(day => new Events(day.url, day.name.text, day.start.local, day.description.text));
-
-        dailyEvents.forEach(event => {
-          const sqlQueryInsert = `INSERT INTO events (search_query, link, name, event_date, summary, created_at) VALUES ($1,$2,$3,$4,$5,$6);`;
-          const sqlValueArr = [data.search_query, event.link, event.name, event.date, event.summary, event.created_at];
-          client.query(sqlQueryInsert, sqlValueArr);
-        })
-        response.send(dailyEvents);
-      }).catch(error => {
-        returnError(error, response);
-      })
-    }
+    sendEventData(sqlResult, response, data, eventUrlData);
   })
 }
 
 // MOVIE DB
-
-
 function getMovies(request, response) {
   const data = request.query.data;
   const movieUrlData = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&query=${data.search_query}`;
   client.query(`SELECT * FROM movies WHERE search_query=$1`, [data.search_query]).then(sqlResult => {
     checkSearchAge(sqlResult, data);
-    if (sqlResult.rowCount > 0 && notTooOld) {
-      response.send(sqlResult.rows);
-    } else {
-      superagent.get(movieUrlData).then(responseFromSuper => {
-        // console.log('stuff', responseFromSuper.body.events);
-
-        const movieBody = responseFromSuper.body.results;
-        const allMovies = movieBody.slice(0, 20).map(movie => new Movie(movie.title, movie.overview, movie.vote_average, movie.poster_path, movie.popularity, movie.release_date));
-
-        allMovies.forEach(movie => {
-          const sqlQueryInsert = `INSERT INTO movies (search_query, title, overview, average_votes, image_url, popularity, released_on, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8);`;
-          const sqlValueArr = [data.search_query, movie.title, movie.overview, movie.average_votes, movie.image_url, movie.popularity, movie.released_on, movie.created_at];
-          client.query(sqlQueryInsert, sqlValueArr);
-        })
-
-        response.send(allMovies);
-      }).catch(error => {
-        returnError(error, response);
-      })
-    }
+    sendMovieData(sqlResult, response, data, movieUrlData);
   })
 }
 
 // YELP
-
-
 function getReviews(request, response) {
   const data = request.query.data;
   const api_url = `https://api.yelp.com/v3/businesses/search?latitude=${data.latitude}&longitude=${data.longitude}`;
   client.query(`SELECT * FROM reviews WHERE search_query=$1`, [data.search_query]).then(sqlResult => {
     checkSearchAge(sqlResult, data);
-    if (sqlResult.rowCount > 0 && notTooOld) {
-      response.send(sqlResult.rows);
-    } else {
-      superagent.get(api_url).set('Authorization', `Bearer ${process.env.YELP_API_KEY}`).then(responseFromSuper => {
-        const yelpData = responseFromSuper.body;
-        const specificYelpData = yelpData.businesses;
-        const allReviews = specificYelpData.slice(0, 20).map(review => new YelpReview(review.name, review.image_url, review.price, review.rating, review.url, review.created_at));
-        allReviews.forEach(review => {
-          const sqlQueryInsert = `INSERT INTO reviews (search_query, name, image_url, price, rating, url, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7);`;
-          const sqlValueArr = [data.search_query, review.name, review.image_url, review.price, review.rating, review.url, review.created_at];
-          client.query(sqlQueryInsert, sqlValueArr);
-        })
-        response.send(allReviews);
-      }).catch(error => {
-        returnError(error, response);
-      })
-    }
+    sendReviewData(sqlResult, response, data, api_url);
   })
 }
 
